@@ -1,27 +1,44 @@
 <script lang="ts" setup>
-import { useTemplateRef } from "vue";
+import { computed, ref } from "vue";
 import { useDraggable } from "../composables/useDraggable";
 import { TItem } from "../types";
-import ItemPreview from "./ItemPreview.vue";
 
 interface Props {
   item: TItem;
+  swapState: {
+    source: { item: TItem; x: number; y: number } | null;
+    target: { item: TItem; x: number; y: number } | null;
+  };
 }
 
 const props = defineProps<Props>();
-const itemRef = useTemplateRef<HTMLElement>("itemRef");
 
-const { state, previewElement, preview } = useDraggable({
+const itemRef = ref<HTMLElement | null>(null);
+
+const { state, TeleportedPreview } = useDraggable({
   element: itemRef,
   getInitialData: () => ({ item: props.item }),
   getData: () => ({ item: props.item }),
-  onDragLeave: ({ source }) => {
-    if ((source.data.item as TItem).id === props.item.id) {
-      state.value = "dragging";
-    } else {
-      state.value = "idle";
-    }
-  },
+});
+
+const itemStyle = computed(() => {
+  if (!props.swapState.source || !props.swapState.target) return {};
+
+  if (props.swapState.source.item.id === props.item.id) {
+    const dx = props.swapState.target.x - props.swapState.source.x;
+    const dy = props.swapState.target.y - props.swapState.source.y;
+    return {
+      transform: `translate(${dx}px, ${120}px)`,
+      transition: "transform 0.3s ease",
+    };
+  } else if (props.swapState.target.item.id === props.item.id) {
+    const dx = props.swapState.source.x - props.swapState.target.x;
+    const dy = props.swapState.source.y - props.swapState.target.y;
+    return {
+      transform: `translate(${dx}px, ${120}px)`,
+      transition: "transform 0.3s ease",
+    };
+  }
 });
 </script>
 
@@ -34,30 +51,14 @@ const { state, previewElement, preview } = useDraggable({
       'item-dragging': state === 'dragging',
       'item-over': state === 'over',
     }"
+    :style="itemStyle"
   >
     {{ props.item.title }}
-    <teleport v-if="preview" to="body">
-      <div
-        ref="previewElement"
-        :style="{
-          position: 'fixed',
-          width: `${preview.bounds.width}px`,
-          height: `${preview.bounds.height}px`,
-          pointerEvents: 'none',
-          willChange: 'transform',
-          zIndex: 1000,
-          top: 0,
-          left: 0,
-          transform: `translate(${preview.bounds.left}px, ${preview.bounds.top}px)`,
-        }"
-      >
-        <ItemPreview :item="props.item" />
-      </div>
-    </teleport>
+    <TeleportedPreview />
   </div>
 </template>
 
-<style scoped>
+<style>
 .grid-item {
   background: #4caf50;
   color: white;
@@ -69,7 +70,7 @@ const { state, previewElement, preview } = useDraggable({
   display: flex;
   justify-content: center;
   align-items: center;
-  transition: transform 0.3s ease, opacity 0.3s ease;
+  transition: transform 0.3s ease, opacity 0.3s ease, filter 0.3s ease;
 }
 
 .item-idle:hover {
@@ -77,7 +78,6 @@ const { state, previewElement, preview } = useDraggable({
 }
 
 .item-dragging {
-  visibility: hidden;
   opacity: 0;
 }
 
@@ -86,6 +86,5 @@ const { state, previewElement, preview } = useDraggable({
   filter: brightness(1.15);
   box-shadow: 0px 8px 12px #091e4226, 0px 0px 1px #091e424f;
   background: #73ec8b;
-  transition: transform 0.3s ease, opacity 0.3s ease, filter 0.3s ease;
 }
 </style>

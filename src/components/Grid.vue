@@ -1,5 +1,6 @@
 <script lang="ts" setup>
-import { ref, useTemplateRef, onMounted, computed, watch } from "vue";
+import { ref, useTemplateRef, onMounted, computed, watch, reactive } from "vue";
+
 import Item from "./Item.vue";
 import {
   autoScrollForElements,
@@ -13,16 +14,29 @@ const props = defineProps<{
   gridSize: number;
 }>();
 
-const items = ref<TItem[]>([]);
+const items = ref<TItem[]>(
+  new Array(20).fill(0).map((_, index) => ({
+    id: index,
+    title: `Item ${index + 1}`,
+  }))
+);
+
+const scrollableRef = useTemplateRef("scrollableRef");
 const itemsAtDragStart = ref<TItem[]>([]);
-const scrollableRef = useTemplateRef("listRef");
 
 const totalItems = computed(() => props.gridSize * props.gridSize);
 
+const swapState = reactive<{
+  source: { item: TItem; x: number; y: number } | null;
+  target: { item: TItem; x: number; y: number } | null;
+}>({
+  source: null,
+  target: null,
+});
 const setupGridItems = () => {
   items.value = Array.from({ length: totalItems.value }, (_, index) => ({
-    id: index + 1,
-    title: `Item ${index + 1}`,
+    id: index,
+    title: `Item ${index}`,
   }));
 };
 
@@ -35,10 +49,7 @@ watch(
 
 onMounted(() => {
   setupGridItems();
-
-  if (!scrollableRef.value) {
-    return;
-  }
+  if (!scrollableRef.value) return;
 
   combine(
     autoScrollForElements({
@@ -46,30 +57,36 @@ onMounted(() => {
     }),
     autoScrollWindowForElements(),
     monitorForElements({
-      onDragStart() {
+      onDragStart({ source }) {
         itemsAtDragStart.value = items.value;
+        const sourceElement = source.element;
+        const rect = sourceElement.getBoundingClientRect();
+        swapState.source = {
+          item: source.data.item as TItem,
+          x: rect.left,
+          y: rect.top,
+        };
       },
-      onDropTargetChange({ location, source }) {
+      onDrop({ location }) {
         const target = location.current.dropTargets[0];
 
+        if (!target) {
+          items.value = itemsAtDragStart.value;
+          return;
+        }
+      },
+      onDropTargetChange({ location }) {
+        const target = location.current.dropTargets[0];
         if (!target) return;
-        const sourceItem = source.data.item as TItem;
-        const destinationItem = target.data.item as TItem;
+        console.log("### :: file: Grid.vue:90 :: target:", target);
 
-        if (sourceItem.id === destinationItem.id) return;
-
-        const sourceIndex = items.value.findIndex(
-          (item) => item.id === sourceItem.id
-        );
-        const destinationIndex = items.value.findIndex(
-          (item) => item.id === destinationItem.id
-        );
-
-        const listClone = [...items.value];
-        listClone.splice(sourceIndex, 1);
-        listClone.splice(destinationIndex, 0, sourceItem);
-
-        items.value = listClone;
+        const targetElement = target.element;
+        const rect = targetElement.getBoundingClientRect();
+        swapState.target = {
+          item: target.data.item as TItem,
+          x: rect.left,
+          y: rect.top,
+        };
       },
     })
   );
@@ -79,9 +96,14 @@ onMounted(() => {
 <template>
   <div class="app-container">
     <main class="main-content">
-      <div class="grid-container" ref="listRef">
+      <div class="grid-container" ref="scrollableRef">
         <transition-group name="grid" tag="div" class="grid">
-          <Item v-for="item in items" :key="item.id" :item="item" />
+          <Item
+            v-for="item in items"
+            :key="item.id"
+            :item="item"
+            :swapState="swapState"
+          />
         </transition-group>
       </div>
     </main>

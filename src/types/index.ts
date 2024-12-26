@@ -3,4 +3,3 @@ export type TItem = {
   title: string;
   image?: string;
 };
-export type DraggableState = "idle" | "preview" | "dragging" | "over";

@@ -11,8 +11,19 @@ import {
   dropTargetForElements,
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { disableNativeDragPreview } from "@atlaskit/pragmatic-drag-and-drop/element/disable-native-drag-preview";
-import { MaybeRefOrGetter, onMounted, ref, toValue, watchEffect } from "vue";
-import { DraggableState } from "../types";
+import {
+  defineComponent,
+  h,
+  MaybeRefOrGetter,
+  onMounted,
+  ref,
+  StyleValue,
+  Teleport,
+  toValue,
+  watchEffect,
+} from "vue";
+import { DraggableState } from "../types/draggable";
+import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 
 // Lib doesn't export these types, so we need to define them ourselves
 type DraggableGetFeedbackArgs = {
@@ -54,6 +65,15 @@ interface DraggableOptions<
   onDragLeave?: (args: BaseEventPayload<TDragType>) => void;
 }
 
+const draggablePreviewStyles: StyleValue = {
+  position: "fixed",
+  pointerEvents: "none",
+  willChange: "transform",
+  zIndex: 1000,
+  top: 0,
+  left: 0,
+};
+
 export const useDraggable = <TElement extends HTMLElement>(
   options: DraggableOptions<TElement>
 ) => {
@@ -81,9 +101,9 @@ export const useDraggable = <TElement extends HTMLElement>(
         canDrag: options.canDrag,
         onDragStart: ({ location }) => {
           state.value = "dragging";
-          const { input } = location.current;
-
+          preventUnhandled.start();
           const bounds = element.getBoundingClientRect();
+          const { input } = location.current;
           offset.value = {
             x: input.clientX - bounds.left,
             y: input.clientY - bounds.top,
@@ -96,14 +116,12 @@ export const useDraggable = <TElement extends HTMLElement>(
         },
         onDrop: () => {
           state.value = "idle";
+          preventUnhandled.stop();
           resetDraggable();
         },
         onGenerateDragPreview: ({ source, nativeSetDragImage }) => {
           disableNativeDragPreview({ nativeSetDragImage });
-
           const bounds = source.element.getBoundingClientRect();
-          if (!bounds) return;
-
           preview.value = {
             element: source.element,
             bounds,
@@ -122,6 +140,18 @@ export const useDraggable = <TElement extends HTMLElement>(
   });
 
   watchEffect(() => {
+    if (!previewElement.value || !preview.value) return;
+
+    const { width, height, left, top } = preview.value.bounds;
+    Object.assign(previewElement.value.style, {
+      ...draggablePreviewStyles,
+      width: `${width}px`,
+      height: `${height}px`,
+      transform: `translate(${left}px, ${top}px)`,
+    });
+  });
+
+  watchEffect(() => {
     if (!previewElement.value || !pointer.value || !offset.value) return;
 
     const x = pointer.value.clientX - offset.value.x;
@@ -129,15 +159,55 @@ export const useDraggable = <TElement extends HTMLElement>(
 
     requestAnimationFrame(() => {
       if (!previewElement.value) return;
-      Object.assign(previewElement.value.style, {
-        transform: `translate(${x}px, ${y}px)`,
-      });
+      previewElement.value.style.transform = `translate(${x}px, ${y}px)`;
     });
+  });
+
+  const TeleportedPreview = defineComponent({
+    inheritAttrs: false,
+    props: {
+      previewClass: {
+        type: String,
+        required: false,
+        default: "",
+      },
+    },
+    setup(props, { slots }) {
+      const draggedElement = ref<HTMLElement | null>(null);
+
+      onMounted(() => {
+        const element = toValue(options.element);
+        if (!element) return;
+
+        draggedElement.value = element.cloneNode(true) as HTMLElement;
+        if (props.previewClass && draggedElement.value) {
+          draggedElement.value.classList.add(props.previewClass);
+        }
+      });
+      return () =>
+        preview.value && draggedElement.value
+          ? h(
+              Teleport,
+              { to: "body" },
+              h("div", { ref: previewElement }, [
+                slots.default
+                  ? slots.default()
+                  : h(draggedElement.value.tagName.toLowerCase(), {
+                      ...Object.fromEntries(
+                        Array.from(draggedElement.value.attributes).map(
+                          (attr) => [attr.name, attr.value]
+                        )
+                      ),
+                      innerHTML: draggedElement.value.innerHTML,
+                    }),
+              ])
+            )
+          : null;
+    },
   });
 
   return {
     state,
-    preview,
-    previewElement,
+    TeleportedPreview,
   };
 };
